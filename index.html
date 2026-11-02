@@ -1,0 +1,744 @@
+
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport"
+        content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <title>Тёмный коридор</title>
+
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+    }
+  }
+  </script>
+
+  <style>
+    * {
+      box-sizing: border-box;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      overscroll-behavior: none;
+      background: #030405;
+      color: #eee;
+      font-family: system-ui, sans-serif;
+    }
+
+    canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+
+    #hud {
+      position: fixed;
+      z-index: 2;
+      top: max(12px, env(safe-area-inset-top));
+      left: 14px;
+      max-width: 70vw;
+      color: #fff;
+      font-size: 14px;
+      text-shadow: 0 1px 5px #000;
+      pointer-events: none;
+    }
+
+    #vignette {
+      position: fixed;
+      inset: 0;
+      z-index: 1;
+      pointer-events: none;
+      background: radial-gradient(ellipse, transparent 35%, rgba(0,0,0,.68) 100%);
+    }
+
+    /* Сенсорная зона осмотра. Джойстик и кнопки находятся поверх неё. */
+    #lookArea {
+      display: none;
+      position: fixed;
+      z-index: 3;
+      inset: 0 0 0 32%;
+      touch-action: none;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    #touchControls {
+      display: none;
+    }
+
+    #joystick {
+      position: fixed;
+      z-index: 5;
+      left: max(18px, env(safe-area-inset-left));
+      bottom: max(22px, env(safe-area-inset-bottom));
+      width: 142px;
+      height: 142px;
+      border: 2px solid rgba(255,255,255,.55);
+      border-radius: 50%;
+      background: rgba(20,24,28,.40);
+      touch-action: none;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    #stick {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      width: 58px;
+      height: 58px;
+      margin: -29px 0 0 -29px;
+      border: 2px solid rgba(255,255,255,.85);
+      border-radius: 50%;
+      background: rgba(220,230,240,.52);
+      pointer-events: none;
+      transform: translate(0, 0);
+    }
+
+    .touchButton {
+      position: fixed;
+      z-index: 6;
+      display: grid;
+      place-items: center;
+      border: 1px solid rgba(255,255,255,.72);
+      background: rgba(15,18,22,.62);
+      color: white;
+      font: 700 14px system-ui, sans-serif;
+      touch-action: none;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    #runButton {
+      right: max(20px, env(safe-area-inset-right));
+      bottom: max(28px, env(safe-area-inset-bottom));
+      width: 76px;
+      height: 76px;
+      border-radius: 50%;
+    }
+
+    #pauseButton {
+      right: max(14px, env(safe-area-inset-right));
+      top: max(14px, env(safe-area-inset-top));
+      width: 46px;
+      height: 46px;
+      border-radius: 50%;
+      font-size: 20px;
+      pointer-events: auto;
+    }
+
+    #overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 10;
+      display: grid;
+      place-items: center;
+      padding: 20px;
+      background: rgba(0,0,0,.82);
+      text-align: center;
+    }
+
+    #panel {
+      width: min(520px, 100%);
+      padding: 24px;
+      border: 1px solid #454545;
+      background: rgba(8,9,11,.96);
+      box-shadow: 0 0 50px #000;
+    }
+
+    h1 {
+      margin: 0 0 14px;
+      font-size: clamp(28px, 7vw, 46px);
+      letter-spacing: .08em;
+    }
+
+    #instructions {
+      line-height: 1.6;
+      color: #bbb;
+    }
+
+    #playButton {
+      margin-top: 12px;
+      padding: 13px 26px;
+      border: 1px solid #ddd;
+      background: #ddd;
+      color: #111;
+      font: inherit;
+      font-weight: 800;
+      cursor: pointer;
+      touch-action: manipulation;
+    }
+
+    #playButton:hover {
+      background: #fff;
+    }
+
+    #debugStatus {
+      position: fixed;
+      z-index: 12;
+      left: 8px;
+      bottom: 5px;
+      max-width: calc(100% - 16px);
+      padding: 5px 8px;
+      background: rgba(0,0,0,.72);
+      color: #bbb;
+      font: 11px monospace;
+      white-space: pre-wrap;
+      pointer-events: none;
+    }
+
+    body.touch #lookArea,
+    body.touch #touchControls {
+      display: block;
+    }
+
+    body.touch #debugStatus {
+      bottom: 4px;
+      max-width: 48vw;
+      font-size: 10px;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="hud">Найди выход. Не дай монстру тебя поймать.</div>
+  <div id="vignette"></div>
+
+  <div id="lookArea" aria-label="Проведи пальцем здесь, чтобы осмотреться"></div>
+
+  <div id="touchControls">
+    <div id="joystick" aria-label="Джойстик движения">
+      <div id="stick"></div>
+    </div>
+    <button id="runButton" class="touchButton" type="button">БЕГ</button>
+    <button id="pauseButton" class="touchButton" type="button" aria-label="Пауза">Ⅱ</button>
+  </div>
+
+  <div id="overlay">
+    <div id="panel">
+      <h1>ТЁМНЫЙ КОРИДОР</h1>
+      <div id="instructions">
+        Ты слышишь, как нечто приближается.<br>
+        Беги и найди выход.
+      </div>
+      <button id="playButton" type="button">НАЧАТЬ</button>
+      <p id="startHint" style="font-size:13px;color:#888">
+        Загружаю игру…
+      </p>
+    </div>
+  </div>
+
+  <div id="debugStatus">Загружаю игру…</div>
+
+  <script type="module">
+    const status = document.getElementById("debugStatus");
+    const startHint = document.getElementById("startHint");
+
+    try {
+      status.textContent = "Загружаю Three.js…";
+
+      const THREE = await import("three");
+      const { PointerLockControls } =
+        await import("three/addons/controls/PointerLockControls.js");
+
+      // Телефон/планшет: используем сенсорные кнопки вместо Pointer Lock.
+      const isTouchDevice =
+        navigator.maxTouchPoints > 0 ||
+        window.matchMedia("(pointer: coarse)").matches;
+
+      if (isTouchDevice) {
+        document.body.classList.add("touch");
+        startHint.textContent =
+          "Джойстик — движение · свайп справа — осмотр · БЕГ — ускорение";
+      } else {
+        startHint.textContent =
+          "WASD — движение · мышь — осмотр · Shift — бежать · Esc — пауза";
+      }
+
+      const SIZE = 21;
+      const CELL = 4;
+      const WALL_HEIGHT = 4.5;
+      const PLAYER_HEIGHT = 1.65;
+      const PLAYER_RADIUS = 0.42;
+
+      const scene = new THREE.Scene();
+      scene.background = new THREE.Color(0x030405);
+      scene.fog = new THREE.FogExp2(0x030405, 0.035);
+
+      const camera = new THREE.PerspectiveCamera(
+        75,
+        window.innerWidth / window.innerHeight,
+        0.1,
+        100
+      );
+      camera.rotation.order = "YXZ";
+
+      const renderer = new THREE.WebGLRenderer({ antialias: true });
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+      renderer.outputColorSpace = THREE.SRGBColorSpace;
+      renderer.toneMapping = THREE.ACESFilmicToneMapping;
+      renderer.toneMappingExposure = 0.85;
+      document.body.appendChild(renderer.domElement);
+
+      scene.add(new THREE.HemisphereLight(0x27303a, 0x070708, 0.32));
+
+      // Создаём лабиринт.
+      const grid = Array.from(
+        { length: SIZE },
+        () => Array(SIZE).fill(1)
+      );
+
+      const start = { x: 1, y: 1 };
+      grid[start.y][start.x] = 0;
+
+      const directions = [
+        { x: 0, y: -2 },
+        { x: 2, y: 0 },
+        { x: 0, y: 2 },
+        { x: -2, y: 0 }
+      ];
+
+      const stack = [{ ...start }];
+
+      while (stack.length > 0) {
+        const current = stack[stack.length - 1];
+
+        const options = directions
+          .map(d => ({ x: current.x + d.x, y: current.y + d.y }))
+          .filter(p =>
+            p.x > 0 && p.y > 0 &&
+            p.x < SIZE - 1 && p.y < SIZE - 1 &&
+            grid[p.y][p.x] === 1
+          );
+
+        if (options.length === 0) {
+          stack.pop();
+          continue;
+        }
+
+        const next = options[Math.floor(Math.random() * options.length)];
+
+        grid[(current.y + next.y) / 2][(current.x + next.x) / 2] = 0;
+        grid[next.y][next.x] = 0;
+        stack.push(next);
+      }
+
+      function worldPosition(cell) {
+        return {
+          x: (cell.x - (SIZE - 1) / 2) * CELL,
+          z: (cell.y - (SIZE - 1) / 2) * CELL
+        };
+      }
+
+      function distancesFrom(source) {
+        const distances = Array.from(
+          { length: SIZE },
+          () => Array(SIZE).fill(-1)
+        );
+
+        if (
+          source.x < 0 || source.y < 0 ||
+          source.x >= SIZE || source.y >= SIZE ||
+          grid[source.y][source.x] !== 0
+        ) {
+          return distances;
+        }
+
+        const queue = [{ x: source.x, y: source.y }];
+        distances[source.y][source.x] = 0;
+
+        for (let i = 0; i < queue.length; i++) {
+          const p = queue[i];
+
+          for (const d of [
+            { x: 1, y: 0 },
+            { x: -1, y: 0 },
+            { x: 0, y: 1 },
+            { x: 0, y: -1 }
+          ]) {
+            const x = p.x + d.x;
+            const y = p.y + d.y;
+
+            if (
+              x >= 0 && y >= 0 && x < SIZE && y < SIZE &&
+              grid[y][x] === 0 && distances[y][x] === -1
+            ) {
+              distances[y][x] = distances[p.y][p.x] + 1;
+              queue.push({ x, y });
+            }
+          }
+        }
+
+        return distances;
+      }
+
+      const startDistances = distancesFrom(start);
+      const openCells = [];
+
+      for (let y = 1; y < SIZE - 1; y++) {
+        for (let x = 1; x < SIZE - 1; x++) {
+          if (startDistances[y][x] >= 0) {
+            openCells.push({
+              x,
+              y,
+              distance: startDistances[y][x]
+            });
+          }
+        }
+      }
+
+      openCells.sort((a, b) => a.distance - b.distance);
+
+      const exitCell = openCells[openCells.length - 1];
+      const monsterCell =
+        openCells[Math.floor((openCells.length - 1) * 0.72)];
+
+      // Игрок начинает на проходе в лабиринт.
+      const startPos = worldPosition(start);
+      camera.position.set(startPos.x, PLAYER_HEIGHT, startPos.z);
+
+      const controls = new PointerLockControls(camera, renderer.domElement);
+      scene.add(camera);
+
+      // Фонарь.
+      const flashlight = new THREE.SpotLight(
+        0xffe8c5, 65, 27, Math.PI / 7, 0.45, 1.4
+      );
+      camera.add(flashlight);
+      camera.add(flashlight.target);
+      flashlight.target.position.set(0, 0, -1);
+
+      // Пол и потолок.
+      const floor = new THREE.Mesh(
+        new THREE.PlaneGeometry(SIZE * CELL, SIZE * CELL),
+        new THREE.MeshStandardMaterial({
+          color: 0x17191a,
+          roughness: 1
+        })
+      );
+      floor.rotation.x = -Math.PI / 2;
+      scene.add(floor);
+
+      const ceiling = new THREE.Mesh(
+        new THREE.PlaneGeometry(SIZE * CELL, SIZE * CELL),
+        new THREE.MeshStandardMaterial({
+          color: 0x08090a,
+          roughness: 1,
+          side: THREE.DoubleSide
+        })
+      );
+      ceiling.rotation.x = -Math.PI / 2;
+      ceiling.position.y = WALL_HEIGHT;
+      scene.add(ceiling);
+
+      // Стены лабиринта.
+      const wallMaterial = new THREE.MeshStandardMaterial({
+        color: 0x292a2b,
+        roughness: 0.96
+      });
+      const wallGeometry = new THREE.BoxGeometry(
+        CELL,
+        WALL_HEIGHT,
+        CELL
+      );
+
+      for (let y = 0; y < SIZE; y++) {
+        for (let x = 0; x < SIZE; x++) {
+          if (grid[y][x] !== 1) continue;
+
+          const pos = worldPosition({ x, y });
+          const wall = new THREE.Mesh(wallGeometry, wallMaterial);
+          wall.position.set(pos.x, WALL_HEIGHT / 2, pos.z);
+          scene.add(wall);
+        }
+      }
+
+      // Светящийся выход.
+      const exitPos = worldPosition(exitCell);
+      const exitGroup = new THREE.Group();
+      exitGroup.position.set(exitPos.x, 0, exitPos.z);
+
+      const exitMaterial = new THREE.MeshStandardMaterial({
+        color: 0x55e6ff,
+        emissive: 0x087f9a,
+        emissiveIntensity: 2.5
+      });
+
+      const pillarGeometry = new THREE.BoxGeometry(0.28, 3.2, 0.3);
+
+      for (const side of [-1, 1]) {
+        const pillar = new THREE.Mesh(pillarGeometry, exitMaterial);
+        pillar.position.set(side * 1.2, 1.6, 0);
+        exitGroup.add(pillar);
+      }
+
+      const top = new THREE.Mesh(
+        new THREE.BoxGeometry(2.7, 0.28, 0.3),
+        exitMaterial
+      );
+      top.position.set(0, 3.2, 0);
+      exitGroup.add(top);
+
+      const portal = new THREE.Mesh(
+        new THREE.PlaneGeometry(2.1, 2.9),
+        new THREE.MeshBasicMaterial({
+          color: 0x23dfff,
+          transparent: true,
+          opacity: 0.33,
+          side: THREE.DoubleSide
+        })
+      );
+      portal.position.y = 1.45;
+      exitGroup.add(portal);
+      scene.add(exitGroup);
+
+      const exitLight = new THREE.PointLight(0x19cfff, 13, 11);
+      exitLight.position.set(exitPos.x, 2.3, exitPos.z);
+      scene.add(exitLight);
+
+      // Простой монстр из фигур.
+      const monster = new THREE.Group();
+      const monsterMaterial = new THREE.MeshStandardMaterial({
+        color: 0x171719,
+        roughness: 0.82
+      });
+
+      const body = new THREE.Mesh(
+        new THREE.CapsuleGeometry(0.55, 1.15, 4, 8),
+        monsterMaterial
+      );
+      body.position.y = 1.1;
+      monster.add(body);
+
+      const head = new THREE.Mesh(
+        new THREE.SphereGeometry(0.48, 12, 10),
+        monsterMaterial
+      );
+      head.position.set(0, 2.15, -0.08);
+      monster.add(head);
+
+      const eyeMaterial = new THREE.MeshBasicMaterial({ color: 0xff1200 });
+
+      for (const side of [-1, 1]) {
+        const eye = new THREE.Mesh(
+          new THREE.SphereGeometry(0.075, 8, 8),
+          eyeMaterial
+        );
+        eye.position.set(side * 0.19, 2.2, -0.49);
+        monster.add(eye);
+      }
+
+      const monsterPos = worldPosition(monsterCell);
+      monster.position.set(monsterPos.x, 0, monsterPos.z);
+      scene.add(monster);
+
+      const monsterLight = new THREE.PointLight(0xaa0000, 2.5, 5);
+      monsterLight.position.set(0, 1.8, 0);
+      monster.add(monsterLight);
+
+      // Игровое состояние и управление.
+      const overlay = document.getElementById("overlay");
+      const playButton = document.getElementById("playButton");
+      const instructions = document.getElementById("instructions");
+      const hud = document.getElementById("hud");
+      const vignette = document.getElementById("vignette");
+      const joystick = document.getElementById("joystick");
+      const stick = document.getElementById("stick");
+      const runButton = document.getElementById("runButton");
+      const pauseButton = document.getElementById("pauseButton");
+      const lookArea = document.getElementById("lookArea");
+
+      const keys = Object.create(null);
+      let state = "ready";
+      let elapsed = 0;
+      let pathTimer = 0;
+      let hudTimer = 0;
+      let monsterTarget = null;
+      let sprintingTouch = false;
+
+      const moveInput = { x: 0, y: 0 };
+      const lookInput = {
+        pointerId: null,
+        lastX: 0,
+        lastY: 0,
+        yaw: 0,
+        pitch: 0
+      };
+
+      const cellAtWorld = value =>
+        Math.round(value / CELL + (SIZE - 1) / 2);
+
+      function canStandAt(x, z) {
+        for (const dx of [-PLAYER_RADIUS, PLAYER_RADIUS]) {
+          for (const dz of [-PLAYER_RADIUS, PLAYER_RADIUS]) {
+            const cx = cellAtWorld(x + dx);
+            const cy = cellAtWorld(z + dz);
+
+            if (
+              cx < 0 || cy < 0 || cx >= SIZE || cy >= SIZE ||
+              grid[cy][cx] === 1
+            ) {
+              return false;
+            }
+          }
+        }
+        return true;
+      }
+
+      function showOverlay(title, text, buttonText) {
+        overlay.style.display = "grid";
+        document.querySelector("#panel h1").textContent = title;
+        instructions.innerHTML = text;
+        playButton.textContent = buttonText;
+      }
+
+      function resetTouchControls() {
+        moveInput.x = 0;
+        moveInput.y = 0;
+        sprintingTouch = false;
+        stick.style.transform = "translate(0px, 0px)";
+      }
+
+      function startOrResume() {
+        if (state === "won" || state === "lost") {
+          location.reload();
+          return;
+        }
+
+        if (isTouchDevice) {
+          state = "playing";
+          overlay.style.display = "none";
+          status.textContent =
+            "Игра запущена. Джойстик — движение, свайп — осмотр.";
+          return;
+        }
+
+        status.textContent = "Запрашиваю управление мышью…";
+        controls.lock();
+      }
+
+      playButton.addEventListener("click", startOrResume);
+
+      controls.addEventListener("lock", () => {
+        if (state === "ready" || state === "paused") {
+          state = "playing";
+        }
+        overlay.style.display = "none";
+        status.textContent = "Игра запущена. WASD — движение, мышь — осмотр.";
+      });
+
+      controls.addEventListener("unlock", () => {
+        for (const key in keys) keys[key] = false;
+        resetTouchControls();
+
+        if (state === "playing") {
+          state = "paused";
+          showOverlay(
+            "ПАУЗА",
+            "Нажми продолжить, когда будешь готов.",
+            "ПРОДОЛЖИТЬ"
+          );
+          status.textContent = "Пауза.";
+        }
+      });
+
+      document.addEventListener("pointerlockerror", () => {
+        status.textContent =
+          "Не удалось захватить мышь. Попробуй нажать «НАЧАТЬ» ещё раз.";
+      });
+
+      pauseButton.addEventListener("click", () => {
+        if (state !== "playing") return;
+
+        if (isTouchDevice) {
+          state = "paused";
+          resetTouchControls();
+          showOverlay(
+            "ПАУЗА",
+            "Нажми продолжить, когда будешь готов.",
+            "ПРОДОЛЖИТЬ"
+          );
+          status.textContent = "Пауза.";
+        } else {
+          controls.unlock();
+        }
+      });
+
+      // Клавиатура для компьютера.
+      window.addEventListener("keydown", event => {
+        keys[event.code] = true;
+
+        if ([
+          "KeyW", "KeyA", "KeyS", "KeyD",
+          "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight",
+          "ShiftLeft", "ShiftRight"
+        ].includes(event.code)) {
+          event.preventDefault();
+        }
+      });
+
+      window.addEventListener("keyup", event => {
+        keys[event.code] = false;
+      });
+
+      window.addEventListener("blur", () => {
+        for (const key in keys) keys[key] = false;
+        resetTouchControls();
+      });
+
+      // Виртуальный джойстик. Pointer Events поддерживают палец и мышь.
+      let movePointerId = null;
+
+      function updateJoystick(event) {
+        const rect = joystick.getBoundingClientRect();
+        const radius = rect.width * 0.38;
+        let x = (event.clientX - (rect.left + rect.width / 2)) / radius;
+        let y = (event.clientY - (rect.top + rect.height / 2)) / radius;
+
+        const length = Math.hypot(x, y);
+        if (length > 1) {
+          x /= length;
+          y /= length;
+        }
+
+        const deadZone = 0.10;
+        const magnitude = Math.hypot(x, y);
+
+        if (magnitude < deadZone) {
+          x = 0;
+          y = 0;
+        } else {
+          const scaled = (magnitude - deadZone) / (1 - deadZone) / magnitude;
+          x *= scaled;
+          y *= scaled;
+        }
+
+        moveInput.x = x;
+        moveInput.y = y;
+
+        const maxKnob = rect.width * 0.30;
+        stick.style.transform =
+          `translate(${x * maxKnob}px, ${y * maxKnob}px)`;
+      }
+
+      joystick.addEventListener("pointerdown", event => {
+        if (movePointerId !== null) return;
+        event.preventDefault();
+
+        movePointerId = event.pointerId;
+        joystick.setPointerCapture(event.pointerId);
+        updateJoystick(event);
+      });
+
+      joystick.addEventListener("pointermove", event => {
+        if (event.pointerId === movePointerId) {
+          updateJoystic
